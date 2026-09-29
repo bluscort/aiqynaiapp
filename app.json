@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "AiqynAI",
+    "slug": "aiqynai",
+    "scheme": "aiqynai",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#07080C",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "kz.aiqyn.app"
+    },
+    "android": {
+      "package": "kz.aiqyn.app",
+      "permissions": ["RECORD_AUDIO"]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "AiqynAI использует микрофон, чтобы ты мог задавать вопросы голосом."
+        }
+      ],
+      "expo-notifications"
+    ]
+  }
+}
