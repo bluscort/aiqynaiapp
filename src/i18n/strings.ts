@@ -29,6 +29,8 @@ const ru = {
   listening: 'Слушаю… нажми на микрофон ещё раз, чтобы отправить',
   transcribing: 'Распознаю речь…',
   demoMode: 'демо-режим',
+  ragdollHint: 'Aiqyn в нокауте 😵 Таскай и бросай его!',
+  ragdollReset: '↺ Вернуть на место',
 
   // Daily quiz
   dailyTitle: 'Ежедневное кормление',
@@ -150,6 +152,8 @@ const kk: Record<StringKey, string> = {
   listening: 'Тыңдап тұрмын… жіберу үшін микрофонды қайта бас',
   transcribing: 'Сөзді танып жатырмын…',
   demoMode: 'демо-режим',
+  ragdollHint: 'Aiqyn нокаутта 😵 Оны сүйреп, лақтыр!',
+  ragdollReset: '↺ Орнына қайтару',
 
   dailyTitle: 'Күнделікті тамақтандыру',
   reviveTitle: 'Тірілту',

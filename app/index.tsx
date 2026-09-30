@@ -17,11 +17,11 @@ export default function Main() {
   const insets = useSafeAreaInsets();
   const pagerRef = useRef<PagerView>(null);
   const progress = useSharedValue(0);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [homeLocked, setHomeLocked] = useState(false);
   const [battleActive, setBattleActive] = useState(false);
-  const locked = chatOpen || battleActive;
+  const locked = homeLocked || battleActive;
 
-  const onChatModeChange = useCallback((open: boolean) => setChatOpen(open), []);
+  const onHomeLockChange = useCallback((locked: boolean) => setHomeLocked(locked), []);
   const onBattleChange = useCallback((playing: boolean) => setBattleActive(playing), []);
 
   return (
@@ -38,7 +38,7 @@ export default function Main() {
         }}
       >
         <View key="home" style={styles.flex}>
-          <HomeScreen onChatModeChange={onChatModeChange} />
+          <HomeScreen onSwipeLockChange={onHomeLockChange} />
         </View>
         <View key="matcher" style={styles.flex}>
           <MatcherScreen />

@@ -9,6 +9,7 @@ import { PrimaryButton } from '@/components/ui';
 import { getCombo } from '@/data/combos';
 import { getUniversity } from '@/data/universities';
 import { useMascot } from '@/hooks/useMascot';
+import { useRagdoll } from '@/hooks/useRagdoll';
 import { useVoiceInput, type VoiceError } from '@/hooks/useVoiceInput';
 import { useLang, useT, type StringKey } from '@/i18n';
 import { isAbortError, streamChat, type ChatTurn } from '@/lib/ai';
@@ -26,7 +27,7 @@ const MOOD_CYCLE: (Mood | null)[] = ['happy', 'hungry', 'critical', null];
 let msgSeq = 0;
 const newId = () => `m${Date.now().toString(36)}${(msgSeq++).toString(36)}`;
 
-export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: boolean) => void }) {
+export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: boolean) => void }) {
   const t = useT();
   const lang = useLang();
   const mascot = useMascot();
@@ -47,12 +48,25 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
   const inputRef = useRef<TextInput>(null);
 
   const chatProgress = useSharedValue(0);
-  const orbCenterY = useSharedValue(0);
+  const ragdollProgress = useSharedValue(0);
+  const ragdoll = useRagdoll(ORB_SIZE / 2);
 
   useEffect(() => {
     chatProgress.value = withTiming(chatOpen ? 1 : 0, { duration: 460, easing: Easing.out(Easing.cubic) });
-    onChatModeChange(chatOpen);
-  }, [chatOpen, chatProgress, onChatModeChange]);
+  }, [chatOpen, chatProgress]);
+
+  useEffect(() => {
+    ragdollProgress.value = withTiming(ragdoll.active ? 1 : 0, { duration: 300 });
+  }, [ragdoll.active, ragdollProgress]);
+
+  // Horizontal swipes must drag the orb / scroll the chat, not flip pages.
+  useEffect(() => onSwipeLockChange(chatOpen || ragdoll.active), [chatOpen, ragdoll.active, onSwipeLockChange]);
+
+  const { active: ragdollActive, reset: resetRagdoll } = ragdoll;
+  const openChat = useCallback(() => {
+    if (ragdollActive) resetRagdoll();
+    setChatOpen(true);
+  }, [ragdollActive, resetRagdoll]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -67,7 +81,7 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
     async (raw: string) => {
       const text = raw.trim();
       if (!text || streaming) return;
-      setChatOpen(true);
+      openChat();
       setInput('');
 
       const botId = newId();
@@ -104,7 +118,7 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
         setStreaming(false);
       }
     },
-    [streaming, messages, lang, name, uni, combo, grade, t],
+    [streaming, messages, lang, name, uni, combo, grade, t, openChat],
   );
 
   const closeChat = () => {
@@ -155,16 +169,34 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
   };
 
   // ── Animations ─────────────────────────────────────────────────────────
-  const orbStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: chatProgress.value * (HEAD_CENTER_Y - orbCenterY.value) },
-      { scale: interpolate(chatProgress.value, [0, 1], [1, HEAD_SCALE]) },
-    ],
+  const { x: ragX, y: ragY, spin, squash, squashVertical, stageH } = ragdoll;
+  const orbStyle = useAnimatedStyle(() => {
+    // The orb rests at the stage centre; in chat mode it floats up into a small head.
+    const chatScale = interpolate(chatProgress.value, [0, 1], [1, HEAD_SCALE]);
+    const s = squash.value;
+    const vertical = squashVertical.value === 1;
+    return {
+      transform: [
+        { translateX: ragX.value },
+        { translateY: ragY.value + chatProgress.value * (HEAD_CENTER_Y - stageH.value / 2) },
+        { scaleX: chatScale * (vertical ? 1 + s * 0.6 : 1 - s) },
+        { scaleY: chatScale * (vertical ? 1 - s : 1 + s * 0.6) },
+        { rotate: `${spin.value}rad` },
+      ],
+    };
+  });
+  const heroFade = useAnimatedStyle(() => {
+    const hidden = Math.max(chatProgress.value, ragdollProgress.value);
+    return {
+      opacity: interpolate(hidden, [0, 0.5], [1, 0], 'clamp'),
+      transform: [{ translateY: hidden * 16 }],
+    };
+  });
+  const ragdollBar = useAnimatedStyle(() => ({
+    opacity: ragdollProgress.value,
+    transform: [{ translateY: (1 - ragdollProgress.value) * 20 }],
   }));
-  const heroFade = useAnimatedStyle(() => ({
-    opacity: interpolate(chatProgress.value, [0, 0.5], [1, 0], 'clamp'),
-    transform: [{ translateY: chatProgress.value * 16 }],
-  }));
+  const heroInteractive = !chatOpen && !ragdoll.active;
   const chatLayer = useAnimatedStyle(() => ({
     opacity: interpolate(chatProgress.value, [0.2, 1], [0, 1], 'clamp'),
     transform: [{ translateY: (1 - chatProgress.value) * 60 }],
@@ -172,7 +204,7 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior="padding">
-      <View style={styles.flex}>
+      <View style={styles.flex} onLayout={ragdoll.onStageLayout}>
         <Animated.View style={[StyleSheet.absoluteFill, chatLayer]} pointerEvents={chatOpen ? 'auto' : 'none'}>
           <ChatThread messages={messages} topInset={CHAT_TOP_INSET} onSuggestion={(s) => void send(s)} />
           <Pressable onPress={closeChat} style={styles.endBtn} hitSlop={8} accessibilityRole="button">
@@ -180,46 +212,58 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
           </Pressable>
         </Animated.View>
 
-        <View style={styles.hero} pointerEvents="box-none">
-          <Animated.View style={[styles.bubble, heroFade]} pointerEvents={chatOpen ? 'none' : 'auto'}>
-            <Text style={styles.bubbleText}>{bubble}</Text>
-            <View style={styles.bubbleTail} />
-          </Animated.View>
+        {/* Equal flexible space above and below the orb slot keeps the orb exactly centred. */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <View style={styles.heroTop} pointerEvents="box-none">
+            <Animated.View style={[styles.bubble, heroFade]} pointerEvents={heroInteractive ? 'auto' : 'none'}>
+              <Text style={styles.bubbleText}>{bubble}</Text>
+              <View style={styles.bubbleTail} />
+            </Animated.View>
+          </View>
+          <View style={styles.orbSlot} pointerEvents="none" />
+          <View style={styles.heroBottom} pointerEvents="box-none">
+            <Animated.View style={[styles.below, heroFade]} pointerEvents={heroInteractive ? 'auto' : 'none'}>
+              <View style={styles.satietyRow}>
+                <View style={styles.satietyTrack}>
+                  <View
+                    style={[
+                      styles.satietyFill,
+                      {
+                        width: `${mascot.satiety}%` as const,
+                        backgroundColor: mascot.mood === 'happy' ? colors.cyan : mascot.mood === 'hungry' ? colors.amber : colors.red,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.satietyText}>{t('satiety', { n: mascot.satiety })}</Text>
+              </View>
+              <PrimaryButton label={cta} onPress={() => router.push('/daily-quiz')} style={styles.cta} />
+              {moodPreview && <Text style={styles.preview}>preview: {moodPreview}</Text>}
+            </Animated.View>
+          </View>
+        </View>
 
-          <Animated.View
-            style={orbStyle}
-            onLayout={(e) => {
-              const { y, height } = e.nativeEvent.layout;
-              orbCenterY.value = y + height / 2;
-            }}
-          >
+        {/* The orb lives in its own full-stage layer so it can be thrown anywhere and still receive touches. */}
+        <View style={styles.orbLayer} pointerEvents="box-none">
+          <Animated.View style={orbStyle} {...ragdoll.panHandlers}>
             <Orb
               mood={mascot.mood}
               size={ORB_SIZE}
               thinking={streaming}
-              onLongPress={chatOpen ? undefined : cycleMoodPreview}
+              onPress={chatOpen ? undefined : ragdoll.registerTap}
+              onLongPress={heroInteractive ? cycleMoodPreview : undefined}
             />
           </Animated.View>
-
-          <Animated.View style={[styles.below, heroFade]} pointerEvents={chatOpen ? 'none' : 'auto'}>
-            <View style={styles.satietyRow}>
-              <View style={styles.satietyTrack}>
-                <View
-                  style={[
-                    styles.satietyFill,
-                    {
-                      width: `${mascot.satiety}%` as const,
-                      backgroundColor: mascot.mood === 'happy' ? colors.cyan : mascot.mood === 'hungry' ? colors.amber : colors.red,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.satietyText}>{t('satiety', { n: mascot.satiety })}</Text>
-            </View>
-            <PrimaryButton label={cta} onPress={() => router.push('/daily-quiz')} style={styles.cta} />
-            {moodPreview && <Text style={styles.preview}>preview: {moodPreview}</Text>}
-          </Animated.View>
         </View>
+
+        {ragdoll.active && (
+          <Animated.View style={[styles.ragdollBar, ragdollBar]} pointerEvents="box-none">
+            <Text style={styles.ragdollHint}>{t('ragdollHint')}</Text>
+            <Pressable onPress={ragdoll.reset} style={styles.ragdollReset} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.endText}>{t('ragdollReset')}</Text>
+            </Pressable>
+          </Animated.View>
+        )}
       </View>
 
       {(notice || voice.state !== 'idle') && (
@@ -231,10 +275,10 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
         ref={inputRef}
         value={input}
         onChangeText={setInput}
-        onFocus={() => setChatOpen(true)}
+        onFocus={openChat}
         onSend={() => void send(input)}
         onMic={() => {
-          setChatOpen(true);
+          openChat();
           voice.toggle();
         }}
         voiceState={voice.state}
@@ -246,11 +290,19 @@ export function HomeScreen({ onChatModeChange }: { onChatModeChange: (open: bool
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  hero: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+  heroTop: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 24 },
+  orbSlot: { height: ORB_SIZE },
+  heroBottom: { flex: 1, justifyContent: 'flex-start', alignItems: 'center', paddingHorizontal: 24 },
+  orbLayer: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  ragdollBar: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', gap: 8 },
+  ragdollHint: { color: colors.muted, fontSize: 12 },
+  ragdollReset: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
   bubble: {
     backgroundColor: colors.surface,
