@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
@@ -12,7 +13,7 @@ import { useLang, useT, type Lang } from '@/i18n';
 import { initials, levelFromXp } from '@/lib/format';
 import { cancelReminders, scheduleDailyReminder } from '@/lib/notifications';
 import { useUserStore } from '@/store/userStore';
-import { colors, radius } from '@/theme';
+import { colors, gradients, radius } from '@/theme';
 
 const REMINDER_HOURS = [8, 16, 19, 21];
 const DEFAULT_NAME = 'Абитуриент';
@@ -62,15 +63,17 @@ export default function Profile() {
       <View style={styles.header}>
         <Text style={styles.title}>{t('profileTitle')}</Text>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.close} accessibilityRole="button" accessibilityLabel={t('close')}>
-          <Ionicons name="close" size={22} color={colors.text} />
+          <Ionicons name="close" size={20} color={colors.text} />
         </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.identity}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials(name)}</Text>
-          </View>
+          <LinearGradient colors={gradients.ring} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatarRing}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials(name)}</Text>
+            </View>
+          </LinearGradient>
           <View style={styles.flex}>
             <Text style={styles.name} numberOfLines={1}>
               {store.name}
@@ -212,21 +215,24 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   content: { paddingHorizontal: 16, paddingTop: 8 },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarRing: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.lime,
+    width: 55,
+    height: 55,
+    borderRadius: 27.5,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: colors.limeInk, fontSize: 20, fontWeight: '900' },
+  avatarText: { color: colors.text, fontSize: 20, fontWeight: '900' },
   name: { color: colors.text, fontSize: 20, fontWeight: '800' },
   sub: { color: colors.muted, fontSize: 13, marginTop: 2 },
   statsRow: { flexDirection: 'row', gap: 8, marginTop: 18 },
@@ -247,8 +253,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface2,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
