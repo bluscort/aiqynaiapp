@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { forwardRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { forwardRef, type ComponentRef } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import type { VoiceState } from '@/hooks/useVoiceInput';
 import { useT } from '@/i18n';
-import { colors } from '@/theme';
+import { isAIConfigured } from '@/lib/ai';
+import { colors, gradients } from '@/theme';
 
 interface Props {
   value: string;
@@ -15,7 +17,7 @@ interface Props {
   busy: boolean;
 }
 
-export const ChatInput = forwardRef<TextInput, Props>(function ChatInput(
+export const ChatInput = forwardRef<ComponentRef<typeof TextInput>, Props>(function ChatInput(
   { value, onChangeText, onFocus, onSend, onMic, voiceState, busy },
   ref,
 ) {
@@ -37,27 +39,32 @@ export const ChatInput = forwardRef<TextInput, Props>(function ChatInput(
           maxLength={1500}
           selectionColor={colors.lime}
         />
-        <Pressable
-          onPress={onMic}
-          hitSlop={8}
-          disabled={voiceState === 'transcribing' || busy}
-          style={[styles.iconBtn, voiceState === 'recording' && styles.recording]}
-          accessibilityRole="button"
-          accessibilityLabel="Voice input"
-        >
-          {voiceState === 'transcribing' ? (
-            <ActivityIndicator size="small" color={colors.text} />
-          ) : (
-            <Ionicons name={voiceState === 'recording' ? 'stop' : 'mic-outline'} size={20} color={colors.text} />
-          )}
-        </Pressable>
+        {/* Speech recognition runs on the AI backend; without it the button would do nothing, so it is not shown. */}
+        {isAIConfigured && (
+          <Pressable
+            onPress={onMic}
+            hitSlop={8}
+            disabled={voiceState === 'transcribing' || busy}
+            style={[styles.iconBtn, voiceState === 'recording' && styles.recording]}
+            accessibilityRole="button"
+            accessibilityLabel="Voice input"
+          >
+            {voiceState === 'transcribing' ? (
+              <ActivityIndicator size="small" color={colors.text} />
+            ) : (
+              <Ionicons name={voiceState === 'recording' ? 'stop' : 'mic-outline'} size={20} color={colors.text} />
+            )}
+          </Pressable>
+        )}
         <Pressable
           onPress={onSend}
           disabled={!canSend}
+          hitSlop={4}
           style={[styles.send, !canSend && styles.sendDisabled]}
           accessibilityRole="button"
           accessibilityLabel="Send"
         >
+          <LinearGradient colors={gradients.primary} style={styles.sendFill} />
           {busy ? (
             <ActivityIndicator size="small" color={colors.limeInk} />
           ) : (
@@ -78,7 +85,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: 26,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     paddingLeft: 16,
     paddingRight: 6,
     paddingVertical: 6,
@@ -99,9 +106,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.lime,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sendFill: { ...StyleSheet.absoluteFill },
   sendDisabled: { opacity: 0.35 },
 });

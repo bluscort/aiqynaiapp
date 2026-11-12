@@ -6,7 +6,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#07080C",
+    "backgroundColor": "#05070B",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
@@ -14,7 +14,9 @@
     },
     "android": {
       "package": "kz.aiqyn.app",
-      "permissions": ["RECORD_AUDIO"]
+      "permissions": [
+        "RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -24,7 +26,8 @@
           "microphonePermission": "AiqynAI использует микрофон, чтобы ты мог задавать вопросы голосом."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-status-bar"
     ]
   }
 }

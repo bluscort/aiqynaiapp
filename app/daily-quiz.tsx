@@ -1,17 +1,93 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  ZoomIn,
+  interpolate,
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Orb } from '@/components/Orb';
-import { PrimaryButton } from '@/components/ui';
+import { Badge, Card, PrimaryButton, usePressScale } from '@/components/ui';
 import { useMascot } from '@/hooks/useMascot';
 import { useLang, useT } from '@/i18n';
 import { buildDailyQuiz } from '@/lib/quiz';
 import { REVIVE_MIN_CORRECT, useUserStore, type DailyAnswer, type DailyResult } from '@/store/userStore';
-import { answerTiles, colors, radius } from '@/theme';
+import { answerTiles, colors, radius, tints } from '@/theme';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+type OptionState = 'idle' | 'correct' | 'wrong' | 'dim';
+
+/** Answer card: lettered badge, springy press, and an animated reveal once the question is answered. */
+function OptionCard({
+  index,
+  label,
+  state,
+  onPress,
+}: {
+  index: number;
+  label: string;
+  state: OptionState;
+  onPress: () => void;
+}) {
+  const tile = answerTiles[index % answerTiles.length]!;
+  const press = usePressScale(0.98);
+  const reveal = useSharedValue(0);
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    reveal.value = withTiming(state === 'idle' ? 0 : 1, { duration: 260 });
+    if (state === 'correct' || state === 'wrong') {
+      pulse.value = withSequence(withTiming(1.03, { duration: 120 }), withSpring(1, { damping: 9, stiffness: 220 }));
+    }
+  }, [state, reveal, pulse]);
+
+  const tint = state === 'correct' ? tints.green : state === 'wrong' ? tints.red : null;
+  const borderTo = tint ? tint.border : colors.border;
+  const bgTo = tint ? tint.bg : colors.surface;
+  const opacityTo = state === 'dim' ? 0.45 : 1;
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(reveal.value, [0, 1], [1, opacityTo]),
+    transform: [{ scale: pulse.value }],
+  }));
+  const revealStyle = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(reveal.value, [0, 1], [colors.border, borderTo]),
+    backgroundColor: interpolateColor(reveal.value, [0, 1], [colors.surface, bgTo]),
+  }));
+
+  return (
+    <Animated.View style={pulseStyle}>
+      <AnimatedPressable
+        onPress={onPress}
+        onPressIn={press.onPressIn}
+        onPressOut={press.onPressOut}
+        disabled={state !== 'idle'}
+        style={[styles.option, revealStyle, press.style]}
+        accessibilityRole="button"
+        accessibilityLabel={`${tile.shape}. ${label}`}
+        accessibilityState={{ disabled: state !== 'idle', selected: state === 'correct' || state === 'wrong' }}
+      >
+        <View style={[styles.letter, { backgroundColor: tile.bg, borderColor: tile.border }]}>
+          <Text style={[styles.letterText, { color: tile.color }]}>{tile.shape}</Text>
+        </View>
+        <Text style={styles.optionText}>{label}</Text>
+        {state === 'correct' && <Ionicons name="checkmark-circle" size={22} color={colors.green} />}
+        {state === 'wrong' && <Ionicons name="close-circle" size={22} color={colors.red} />}
+      </AnimatedPressable>
+    </Animated.View>
+  );
+}
 
 export default function DailyQuiz() {
   const t = useT();
@@ -74,11 +150,19 @@ export default function DailyQuiz() {
         <Animated.View entering={ZoomIn.duration(400)}>
           <Orb mood={mascot.mood} size={170} />
         </Animated.View>
-        <Animated.View entering={FadeInDown.delay(150)} style={styles.resultBlock}>
-          <Text style={styles.resultTitle}>{t('resultTitle', { c: result.correct, n: result.total })}</Text>
-          <Text style={styles.resultText}>{message}</Text>
-          <Text style={styles.rewards}>{t('rewards', { xp: result.xp, coins: result.coins })}</Text>
-          <Text style={styles.satiety}>{t('satiety', { n: mascot.satiety })}</Text>
+        <Animated.View entering={FadeInDown.delay(150)} style={styles.resultWrap}>
+          <Card style={styles.resultCard}>
+            <Text style={styles.resultTitle}>{t('resultTitle', { c: result.correct, n: result.total })}</Text>
+            <Text style={styles.resultText}>{message}</Text>
+            <View style={styles.rewardRow}>
+              <Badge label={`+${result.xp} XP`} />
+              {result.coins > 0 && <Badge label={`+${result.coins} 🪙`} tone="amber" />}
+            </View>
+            <View style={styles.satietyRow}>
+              <Ionicons name="flash" size={13} color={colors.muted} />
+              <Text style={styles.satiety}>{t('satiety', { n: mascot.satiety })}</Text>
+            </View>
+          </Card>
         </Animated.View>
         <View style={styles.resultActions}>
           <PrimaryButton label={t('done')} onPress={close} />
@@ -90,21 +174,23 @@ export default function DailyQuiz() {
 
   const answered = selected !== null;
   const isCorrect = selected === q.answer;
+  const feedbackColor = isCorrect ? colors.green : colors.red;
+  const feedbackTint = isCorrect ? tints.green : tints.red;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
       <View style={styles.header}>
         <Pressable onPress={close} hitSlop={12} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel={t('close')}>
-          <Ionicons name="close" size={22} color={colors.text} />
+          <Ionicons name="close" size={20} color={colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{hardcore ? t('reviveTitle') : t('dailyTitle')}</Text>
-        <View style={styles.closeBtn} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <View style={styles.progressRow}>
         {questions.map((_, i) => {
           const a = answers[i];
-          const color = a ? (a.correct ? colors.green : colors.red) : i === index ? colors.text : 'rgba(255,255,255,0.12)';
+          const color = a ? (a.correct ? colors.green : colors.red) : i === index ? colors.lime : 'rgba(255,255,255,0.12)';
           return <View key={i} style={[styles.progressSeg, { backgroundColor: color }]} />;
         })}
       </View>
@@ -122,44 +208,34 @@ export default function DailyQuiz() {
           <Text style={styles.question}>{text.q}</Text>
           <View style={styles.options}>
             {text.options.map((option, i) => {
-              const tile = answerTiles[i % answerTiles.length]!;
-              const showCorrect = answered && i === q.answer;
-              const showWrong = answered && i === selected && !isCorrect;
-              return (
-                <Pressable
-                  key={i}
-                  onPress={() => choose(i)}
-                  disabled={answered}
-                  style={({ pressed }) => [
-                    styles.option,
-                    pressed && { backgroundColor: colors.surface2 },
-                    showCorrect && styles.optionCorrect,
-                    showWrong && styles.optionWrong,
-                    answered && !showCorrect && !showWrong && { opacity: 0.45 },
-                  ]}
-                >
-                  <View style={[styles.shape, { backgroundColor: tile.color }]}>
-                    <Text style={styles.shapeText}>{tile.shape}</Text>
-                  </View>
-                  <Text style={styles.optionText}>{option}</Text>
-                  {showCorrect && <Ionicons name="checkmark-circle" size={22} color={colors.green} />}
-                  {showWrong && <Ionicons name="close-circle" size={22} color={colors.red} />}
-                </Pressable>
-              );
+              let state: OptionState = 'idle';
+              if (answered) state = i === q.answer ? 'correct' : i === selected ? 'wrong' : 'dim';
+              return <OptionCard key={i} index={i} label={option} state={state} onPress={() => choose(i)} />;
             })}
           </View>
         </Animated.View>
 
         {answered && (
-          <Animated.View entering={FadeInDown.duration(250)} style={styles.feedback}>
-            <Text style={[styles.feedbackTitle, { color: isCorrect ? colors.green : colors.red }]}>
-              {isCorrect ? t('correct') : t('wrong', { a: text.options[q.answer]! })}
-            </Text>
-            {text.explain && (
-              <Text style={styles.explain}>
-                <Text style={styles.explainLabel}>{t('explanation')}: </Text>
-                {text.explain}
+          <Animated.View
+            entering={FadeInDown.duration(250)}
+            style={[styles.feedback, { borderColor: feedbackTint.border, backgroundColor: feedbackTint.bg }]}
+          >
+            <View style={styles.feedbackHead}>
+              <View style={[styles.feedbackIcon, { backgroundColor: feedbackColor }]}>
+                <Ionicons name={isCorrect ? 'checkmark' : 'close'} size={16} color={colors.bg} />
+              </View>
+              <Text style={[styles.feedbackTitle, { color: feedbackColor }]}>
+                {isCorrect ? t('correct') : t('wrong', { a: text.options[q.answer]! })}
               </Text>
+            </View>
+            {text.explain && (
+              <View style={styles.explainBlock}>
+                <View style={styles.explainHead}>
+                  <Ionicons name="bulb-outline" size={14} color={colors.muted} />
+                  <Text style={styles.explainLabel}>{t('explanation')}</Text>
+                </View>
+                <Text style={styles.explain}>{text.explain}</Text>
+              </View>
             )}
           </Animated.View>
         )}
@@ -172,15 +248,27 @@ export default function DailyQuiz() {
   );
 }
 
+const CLOSE_SIZE = 36;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   flex: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
-  closeBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  closeBtn: {
+    width: CLOSE_SIZE,
+    height: CLOSE_SIZE,
+    borderRadius: CLOSE_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  headerSpacer: { width: CLOSE_SIZE },
   headerTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  progressRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginTop: 10 },
-  progressSeg: { flex: 1, height: 4, borderRadius: 2 },
+  progressRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginTop: 12 },
+  progressSeg: { flex: 1, height: 6, borderRadius: 3 },
   body: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 24 },
   orbRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   counter: { color: colors.muted, fontSize: 13, fontWeight: '600' },
@@ -191,34 +279,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 12,
+    minHeight: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  optionCorrect: { borderColor: colors.green, backgroundColor: 'rgba(34,197,94,0.1)' },
-  optionWrong: { borderColor: colors.red, backgroundColor: 'rgba(239,68,68,0.1)' },
-  shape: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  shapeText: { color: '#fff', fontSize: 13 },
+  letter: { width: 32, height: 32, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  letterText: { fontSize: 14, fontWeight: '900' },
   optionText: { color: colors.text, fontSize: 16, flex: 1, fontWeight: '500' },
-  feedback: {
-    marginTop: 16,
-    padding: 14,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 6,
-  },
-  feedbackTitle: { fontSize: 15, fontWeight: '700' },
-  explain: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  explainLabel: { color: colors.text, fontWeight: '700' },
+  feedback: { marginTop: 16, padding: 14, borderRadius: radius.md, borderWidth: 1, gap: 12 },
+  feedbackHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  feedbackIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  feedbackTitle: { flex: 1, fontSize: 15, fontWeight: '700', lineHeight: 20 },
+  explainBlock: { gap: 6, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  explainHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  explainLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  explain: { color: colors.text, fontSize: 14, lineHeight: 20 },
   footer: { paddingHorizontal: 16, paddingTop: 8 },
-  resultBlock: { alignItems: 'center', gap: 8, marginTop: 20 },
-  resultTitle: { color: colors.text, fontSize: 24, fontWeight: '800', textAlign: 'center' },
+  resultWrap: { alignSelf: 'stretch', marginTop: 20 },
+  resultCard: { alignItems: 'center', gap: 10, padding: 20 },
+  resultTitle: { color: colors.text, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: -0.3 },
   resultText: { color: colors.muted, fontSize: 15, textAlign: 'center', lineHeight: 21 },
-  rewards: { color: colors.lime, fontSize: 18, fontWeight: '800', marginTop: 4 },
-  satiety: { color: colors.faint, fontSize: 12 },
-  resultActions: { alignSelf: 'stretch', gap: 10, marginTop: 28 },
+  rewardRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  satietyRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  satiety: { color: colors.muted, fontSize: 12, fontWeight: '600' },
+  resultActions: { alignSelf: 'stretch', gap: 10, marginTop: 20 },
 });

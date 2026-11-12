@@ -1,17 +1,19 @@
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { Orb } from '@/components/Orb';
-import { Card, PrimaryButton, Segmented } from '@/components/ui';
+import { Badge, Card, PrimaryButton, Segmented } from '@/components/ui';
 import type { Subject } from '@/data/combos';
 import { LEAGUE_SCHOOLS, LEAGUE_STUDENTS } from '@/data/leaderboard';
 import type { Question } from '@/data/questions';
 import { useLang, useT, type StringKey } from '@/i18n';
 import { initials } from '@/lib/format';
 import { buildBattleQuiz } from '@/lib/quiz';
-import { useUserStore, type DuelOutcome } from '@/store/userStore';
-import { answerTiles, colors, radius } from '@/theme';
+import { DUEL_REWARDS, useUserStore, type DuelOutcome } from '@/store/userStore';
+import { answerTiles, colors, gradients, medalColors, radius, tints } from '@/theme';
 
 const TOTAL_MS = 60_000;
 const REVEAL_MS = 1100;
@@ -28,6 +30,28 @@ interface BotTurn {
 }
 
 type Phase = 'lobby' | 'playing' | 'result';
+
+/** Win / loss / draw record as three mini cards. */
+function RecordCards({ wins, losses, draws }: { wins: number; losses: number; draws: number }) {
+  const t = useT();
+  const items = [
+    { label: t('wins'), value: wins, color: colors.green },
+    { label: t('losses'), value: losses, color: colors.red },
+    { label: t('draws'), value: draws, color: colors.text },
+  ];
+  return (
+    <View style={styles.recordRow}>
+      {items.map((s) => (
+        <View key={s.label} style={styles.recordCard}>
+          <Text style={[styles.recordValue, { color: s.color }]}>{s.value}</Text>
+          <Text style={styles.recordLabel} numberOfLines={1}>
+            {s.label}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 // ── Battle ──────────────────────────────────────────────────────────────
 
@@ -157,31 +181,49 @@ function Battle({ onPlayingChange }: { onPlayingChange: (playing: boolean) => vo
 
   if (phase === 'lobby') {
     return (
-      <View style={styles.lobby}>
-        <Orb mood="happy" size={120} />
-        <Text style={styles.lobbyTitle}>{t('battleTitle')}</Text>
-        <Text style={styles.lobbyText}>{t('battleRules')}</Text>
-        <Text style={styles.lobbyReward}>{t('battleRewards')}</Text>
-        <PrimaryButton label={t('startBattle')} onPress={start} style={styles.wide} />
-        <Text style={styles.record}>{t('record', { w: arena.wins, l: arena.losses, d: arena.draws })}</Text>
-      </View>
+      <ScrollView contentContainerStyle={styles.lobby} showsVerticalScrollIndicator={false}>
+        <Card style={styles.lobbyCard}>
+          <LinearGradient colors={gradients.cyanGlow} style={styles.lobbyGlow} pointerEvents="none" />
+          <Orb mood="happy" size={92} />
+          <Text style={styles.lobbyTitle}>{t('battleTitle')}</Text>
+          <Text style={styles.lobbyText}>{t('battleRules')}</Text>
+          <View style={styles.rewardBlock}>
+            <Text style={styles.rewardLabel}>{t('rewardLabel')}</Text>
+            <View style={styles.rewardRow}>
+              <Badge label={`+${DUEL_REWARDS.win.xp} XP`} />
+              <Badge label={`+${DUEL_REWARDS.win.coins} 🪙`} tone="amber" />
+            </View>
+          </View>
+          <PrimaryButton label={t('startBattle')} onPress={start} style={styles.wide} />
+        </Card>
+        <RecordCards wins={arena.wins} losses={arena.losses} draws={arena.draws} />
+      </ScrollView>
     );
   }
 
   if (phase === 'result' && outcome) {
     const titleKey: Record<DuelOutcome, StringKey> = { win: 'win', lose: 'lose', draw: 'draw' };
     const subKey: Record<DuelOutcome, StringKey> = { win: 'winSub', lose: 'loseSub', draw: 'drawSub' };
+    const reward = DUEL_REWARDS[outcome];
     return (
-      <Animated.View entering={ZoomIn.duration(300)} style={styles.lobby}>
-        <Orb mood={outcome === 'lose' ? 'hungry' : 'happy'} size={110} />
-        <Text style={[styles.resultTitle, { color: outcome === 'win' ? colors.lime : colors.text }]}>{t(titleKey[outcome])}</Text>
-        <Text style={styles.resultScore}>
-          {scores.user} : {scores.bot}
-        </Text>
-        <Text style={styles.lobbyText}>{t(subKey[outcome])}</Text>
-        <PrimaryButton label={t('playAgain')} onPress={start} style={styles.wide} />
-        <Text style={styles.record}>{t('record', { w: arena.wins, l: arena.losses, d: arena.draws })}</Text>
-      </Animated.View>
+      <ScrollView contentContainerStyle={styles.lobby} showsVerticalScrollIndicator={false}>
+        <Animated.View entering={ZoomIn.duration(300)}>
+          <Card style={styles.lobbyCard}>
+            <Orb mood={outcome === 'lose' ? 'hungry' : 'happy'} size={92} />
+            <Text style={[styles.resultTitle, { color: outcome === 'win' ? colors.lime : colors.text }]}>{t(titleKey[outcome])}</Text>
+            <Text style={styles.resultScore}>
+              {scores.user} : {scores.bot}
+            </Text>
+            <Text style={styles.lobbyText}>{t(subKey[outcome])}</Text>
+            <View style={styles.rewardRow}>
+              <Badge label={`+${reward.xp} XP`} />
+              {reward.coins > 0 && <Badge label={`+${reward.coins} 🪙`} tone="amber" />}
+            </View>
+            <PrimaryButton label={t('playAgain')} onPress={start} style={styles.wide} />
+          </Card>
+        </Animated.View>
+        <RecordCards wins={arena.wins} losses={arena.losses} draws={arena.draws} />
+      </ScrollView>
     );
   }
 
@@ -216,8 +258,10 @@ function Battle({ onPlayingChange }: { onPlayingChange: (playing: boolean) => vo
         <Text style={styles.meta}>{questionSeconds !== null ? `${questionSeconds.toFixed(1)} s` : ''}</Text>
       </View>
 
-      <Animated.View key={q.id} entering={FadeIn.duration(220)} style={styles.questionCard}>
-        <Text style={styles.questionText}>{text.q}</Text>
+      <Animated.View key={q.id} entering={FadeIn.duration(220)}>
+        <Card style={styles.questionCard}>
+          <Text style={styles.questionText}>{text.q}</Text>
+        </Card>
       </Animated.View>
 
       <Text style={styles.botStatus}>
@@ -230,7 +274,7 @@ function Battle({ onPlayingChange }: { onPlayingChange: (playing: boolean) => vo
         {text.options.map((option, i) => {
           const tile = answerTiles[i % answerTiles.length]!;
           const isCorrect = i === q.answer;
-          const dim = revealed && !isCorrect;
+          const isWrongPick = revealed && i === selected && !isCorrect;
           return (
             <Pressable
               key={i}
@@ -238,20 +282,30 @@ function Battle({ onPlayingChange }: { onPlayingChange: (playing: boolean) => vo
               disabled={revealed}
               style={({ pressed }) => [
                 styles.tile,
-                { backgroundColor: tile.color, opacity: dim ? (i === selected ? 0.55 : 0.25) : pressed ? 0.85 : 1 },
+                { borderColor: tile.border, shadowColor: tile.color },
+                pressed && { backgroundColor: tile.bg },
                 revealed && isCorrect && styles.tileCorrect,
+                isWrongPick && styles.tileWrong,
+                revealed && !isCorrect && !isWrongPick && styles.tileDim,
               ]}
             >
-              <Text style={styles.tileShape}>{tile.shape}</Text>
+              <View style={styles.tileHead}>
+                <View style={[styles.letter, { backgroundColor: tile.bg, borderColor: tile.border }]}>
+                  <Text style={[styles.letterText, { color: tile.color }]}>{tile.shape}</Text>
+                </View>
+                <View style={styles.tileMarks}>
+                  {revealed && bot?.answered && bot.choice === i && (
+                    <View style={styles.botMark}>
+                      <Text style={styles.botMarkText}>AI</Text>
+                    </View>
+                  )}
+                  {revealed && isCorrect && <Ionicons name="checkmark-circle" size={22} color={colors.green} />}
+                  {isWrongPick && <Ionicons name="close-circle" size={22} color={colors.red} />}
+                </View>
+              </View>
               <Text style={styles.tileText} numberOfLines={3} adjustsFontSizeToFit>
                 {option}
               </Text>
-              {revealed && (isCorrect || i === selected) && <Text style={styles.tileMark}>{isCorrect ? '✓' : '✗'}</Text>}
-              {revealed && bot?.answered && bot.choice === i && (
-                <View style={styles.botMark}>
-                  <Text style={styles.botMarkText}>AI</Text>
-                </View>
-              )}
             </Pressable>
           );
         })}
@@ -260,7 +314,51 @@ function Battle({ onPlayingChange }: { onPlayingChange: (playing: boolean) => vo
   );
 }
 
-// ── League ──────────────────────────────────────────────────────────────
+// ── League ──
+
+interface LeagueEntry {
+  key: string;
+  title: string;
+  sub: string;
+  xp: number;
+  me: boolean;
+  /** Initials for the avatar; schools have none. */
+  avatar?: string;
+}
+
+function LeagueRow({ rank, entry }: { rank: number; entry: LeagueEntry }) {
+  const medal = medalColors[rank - 1];
+  return (
+    <View
+      style={[
+        styles.listRow,
+        medal ? [styles.podiumRow, { borderColor: `${medal}99`, backgroundColor: `${medal}14` }] : entry.me && styles.meRow,
+      ]}
+    >
+      {medal ? (
+        <View style={[styles.rankBadge, { borderColor: medal, backgroundColor: `${medal}26` }]}>
+          <Text style={[styles.rankBadgeText, { color: medal }]}>{rank}</Text>
+        </View>
+      ) : (
+        <Text style={styles.rank}>{rank}</Text>
+      )}
+      {entry.avatar !== undefined && (
+        <View style={[styles.avatar, entry.me && { backgroundColor: colors.lime }]}>
+          <Text style={[styles.avatarText, entry.me && { color: colors.limeInk }]}>{entry.avatar}</Text>
+        </View>
+      )}
+      <View style={styles.flex}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {entry.title}
+        </Text>
+        <Text style={styles.rowSub} numberOfLines={1}>
+          {entry.sub}
+        </Text>
+      </View>
+      <Text style={[styles.rowXp, medal && { color: medal }]}>{entry.xp.toLocaleString('ru-RU')} XP</Text>
+    </View>
+  );
+}
 
 function League() {
   const t = useT();
@@ -276,8 +374,27 @@ function League() {
     [name, xp, t],
   );
   const myRank = rows.findIndex((r) => r.me) + 1;
-  const top = rows.slice(0, 10);
-  const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : String(rank));
+
+  const entries: LeagueEntry[] =
+    tab === 'students'
+      ? rows.slice(0, 10).map((r, i) => ({
+          key: `${r.name}-${i}`,
+          title: r.name,
+          sub: r.school,
+          xp: r.xp,
+          me: r.me,
+          avatar: initials(r.name),
+        }))
+      : LEAGUE_SCHOOLS.map((s) => ({
+          key: `${s.name}-${s.city}`,
+          title: `${s.name}, ${s.city}`,
+          sub: t('studentsCount', { n: s.students }),
+          xp: s.xp,
+          me: false,
+        }));
+  const podium = entries.slice(0, 3);
+  const rest = entries.slice(3);
+  const meBelow = tab === 'students' && myRank > 10;
 
   return (
     <ScrollView contentContainerStyle={styles.league} showsVerticalScrollIndicator={false}>
@@ -293,56 +410,23 @@ function League() {
       </View>
       <Text style={styles.leagueHint}>{t('leagueHint')}</Text>
 
-      {tab === 'students' ? (
+      <View style={styles.podium}>
+        {podium.map((entry, i) => (
+          <LeagueRow key={entry.key} rank={i + 1} entry={entry} />
+        ))}
+      </View>
+
+      {(rest.length > 0 || meBelow) && (
         <Card style={styles.listCard}>
-          {top.map((r, i) => (
-            <View key={`${r.name}-${i}`} style={[styles.listRow, r.me && styles.meRow]}>
-              <Text style={styles.rank}>{medal(i + 1)}</Text>
-              <View style={[styles.avatar, r.me && { backgroundColor: colors.lime }]}>
-                <Text style={[styles.avatarText, r.me && { color: colors.limeInk }]}>{initials(r.name)}</Text>
-              </View>
-              <View style={styles.flex}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {r.name}
-                </Text>
-                <Text style={styles.rowSub} numberOfLines={1}>
-                  {r.school}
-                </Text>
-              </View>
-              <Text style={styles.rowXp}>{r.xp.toLocaleString('ru-RU')} XP</Text>
-            </View>
+          {rest.map((entry, i) => (
+            <LeagueRow key={entry.key} rank={i + 4} entry={entry} />
           ))}
-          {myRank > 10 && (
+          {meBelow && (
             <>
               <Text style={styles.gap}>···</Text>
-              <View style={[styles.listRow, styles.meRow]}>
-                <Text style={styles.rank}>{myRank}</Text>
-                <View style={[styles.avatar, { backgroundColor: colors.lime }]}>
-                  <Text style={[styles.avatarText, { color: colors.limeInk }]}>{initials(name)}</Text>
-                </View>
-                <View style={styles.flex}>
-                  <Text style={styles.rowName}>{name}</Text>
-                  <Text style={styles.rowSub}>{t('yourRank')}</Text>
-                </View>
-                <Text style={styles.rowXp}>{xp.toLocaleString('ru-RU')} XP</Text>
-              </View>
+              <LeagueRow rank={myRank} entry={{ key: 'me', title: name, sub: t('yourRank'), xp, me: true, avatar: initials(name) }} />
             </>
           )}
-        </Card>
-      ) : (
-        <Card style={styles.listCard}>
-          {LEAGUE_SCHOOLS.map((s, i) => (
-            <View key={`${s.name}-${s.city}`} style={styles.listRow}>
-              <Text style={styles.rank}>{medal(i + 1)}</Text>
-              <View style={styles.flex}>
-                <Text style={styles.rowName}>
-                  {s.name}, {s.city}
-                </Text>
-                <Text style={styles.rowSub}>{t('studentsCount', { n: s.students })}</Text>
-              </View>
-              <Text style={styles.rowXp}>{s.xp.toLocaleString('ru-RU')} XP</Text>
-            </View>
-          ))}
         </Card>
       )}
     </ScrollView>
@@ -386,13 +470,28 @@ export function ArenaScreen({ onBattleChange }: { onBattleChange: (playing: bool
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   segment: { paddingHorizontal: 16, paddingTop: 8 },
-  wide: { alignSelf: 'stretch', marginTop: 8 },
-  lobby: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, gap: 10 },
-  lobbyTitle: { color: colors.text, fontSize: 24, fontWeight: '800', marginTop: 8 },
+  wide: { alignSelf: 'stretch', marginTop: 4 },
+  lobby: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 16, gap: 12 },
+  lobbyCard: { alignItems: 'center', gap: 12, padding: 20 },
+  lobbyGlow: { ...StyleSheet.absoluteFill, borderRadius: radius.xl - 1 },
+  lobbyTitle: { color: colors.text, fontSize: 24, fontWeight: '800', letterSpacing: -0.3 },
   lobbyText: { color: colors.muted, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  lobbyReward: { color: colors.lime, fontSize: 14, fontWeight: '700' },
-  record: { color: colors.faint, fontSize: 12, marginTop: 4 },
-  resultTitle: { fontSize: 32, fontWeight: '900', marginTop: 8 },
+  rewardBlock: { alignItems: 'center', gap: 8 },
+  rewardLabel: { color: colors.faint, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  rewardRow: { flexDirection: 'row', gap: 8 },
+  recordRow: { flexDirection: 'row', gap: 8 },
+  recordCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  recordValue: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  recordLabel: { color: colors.muted, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  resultTitle: { fontSize: 32, fontWeight: '900', letterSpacing: -0.5 },
   resultScore: { color: colors.text, fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
   play: { flex: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   scoreboard: { flexDirection: 'row', alignItems: 'center' },
@@ -406,56 +505,59 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     borderWidth: 2,
     borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   timerText: { color: colors.text, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  timeTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', marginTop: 12, overflow: 'hidden' },
-  timeFill: { height: '100%', backgroundColor: colors.lime },
+  timeTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', marginTop: 12, overflow: 'hidden' },
+  timeFill: { height: '100%', borderRadius: 3, backgroundColor: colors.lime },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   meta: { color: colors.faint, fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  questionCard: {
-    marginTop: 8,
-    padding: 18,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    minHeight: 96,
-    justifyContent: 'center',
-  },
+  questionCard: { marginTop: 8, padding: 18, minHeight: 96, justifyContent: 'center' },
   questionText: { color: colors.text, fontSize: 17, lineHeight: 24, fontWeight: '600', textAlign: 'center' },
   botStatus: { color: colors.muted, fontSize: 12, textAlign: 'center', marginVertical: 10 },
   tiles: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  // Dark card; the option's own colour lives in the border, the glow and the letter badge.
   tile: {
     width: '46%',
     flexGrow: 1,
     minHeight: 84,
     borderRadius: radius.md,
+    borderWidth: 1.5,
+    backgroundColor: colors.surface,
     padding: 12,
     justifyContent: 'space-between',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
   },
-  tileCorrect: { borderWidth: 3, borderColor: '#FFFFFF' },
-  tileShape: { color: 'rgba(255,255,255,0.85)', fontSize: 16 },
-  tileText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
-  tileMark: { position: 'absolute', top: 8, right: 10, color: '#fff', fontSize: 20, fontWeight: '900' },
+  tileCorrect: { borderColor: colors.green, backgroundColor: tints.green.bg, shadowColor: colors.green },
+  tileWrong: { borderColor: colors.red, backgroundColor: tints.red.bg, shadowColor: colors.red },
+  tileDim: { opacity: 0.35 },
+  tileHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  tileMarks: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  letter: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  letterText: { fontSize: 14, fontWeight: '900' },
+  tileText: { color: colors.text, fontSize: 16, fontWeight: '700' },
   botMark: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  botMarkText: { color: '#fff', fontSize: 10, fontWeight: '900' },
+  botMarkText: { color: colors.text, fontSize: 10, fontWeight: '900' },
   league: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
   leagueTabs: { alignSelf: 'center', width: 240 },
   leagueHint: { color: colors.faint, fontSize: 11, textAlign: 'center', marginVertical: 10 },
+  podium: { gap: 8, marginBottom: 10 },
+  podiumRow: { borderWidth: 1, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 12 },
   listCard: { paddingVertical: 6, paddingHorizontal: 8 },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 6, borderRadius: radius.sm },
-  meRow: { backgroundColor: 'rgba(212,245,60,0.08)' },
-  rank: { width: 26, textAlign: 'center', color: colors.muted, fontSize: 14, fontWeight: '800' },
+  meRow: { backgroundColor: tints.lime.bg },
+  rank: { width: 28, textAlign: 'center', color: colors.muted, fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  rankBadge: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  rankBadgeText: { fontSize: 13, fontWeight: '900' },
   avatar: {
     width: 32,
     height: 32,

@@ -1,10 +1,14 @@
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ComponentRef } from 'react';
 import { Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatThread, type ChatMessage } from '@/components/ChatThread';
 import { Orb } from '@/components/Orb';
+import { SlimeEffects } from '@/components/SlimeEffects';
 import { PrimaryButton } from '@/components/ui';
 import { getCombo } from '@/data/combos';
 import { getUniversity } from '@/data/universities';
@@ -15,19 +19,46 @@ import { useLang, useT, type StringKey } from '@/i18n';
 import { isAbortError, streamChat, type ChatTurn } from '@/lib/ai';
 import type { Mood } from '@/lib/mascot';
 import { useUserStore } from '@/store/userStore';
-import { colors, radius } from '@/theme';
+import { colors, gradients, moodAccents, radius } from '@/theme';
 
 const ORB_SIZE = 184;
 const HEAD_SCALE = 0.3;
 /** Vertical centre of the floating orb head in chat mode. */
 const HEAD_CENTER_Y = 30;
 const CHAT_TOP_INSET = 64;
+const GLOW_SIZE = 460;
 const MOOD_CYCLE: (Mood | null)[] = ['happy', 'hungry', 'critical', null];
+const MOOD_LABEL: Record<Mood, StringKey> = { happy: 'moodHappy', hungry: 'moodHungry', critical: 'moodCritical' };
 
 let msgSeq = 0;
 const newId = () => `m${Date.now().toString(36)}${(msgSeq++).toString(36)}`;
 
-export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: boolean) => void }) {
+/** Soft radial light behind the orb, tinted by its mood. */
+function MoodGlow({ mood }: { mood: Mood }) {
+  const id = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const { glow, glowOpacity } = moodAccents[mood];
+  return (
+    <Svg width={GLOW_SIZE} height={GLOW_SIZE}>
+      <Defs>
+        <RadialGradient id={id} cx="50%" cy="50%" r="50%">
+          <Stop offset="0" stopColor={glow[0]} stopOpacity={glowOpacity} />
+          <Stop offset="0.55" stopColor={glow[1]} stopOpacity={glowOpacity * 0.35} />
+          <Stop offset="1" stopColor={glow[1]} stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Circle cx={GLOW_SIZE / 2} cy={GLOW_SIZE / 2} r={GLOW_SIZE / 2} fill={`url(#${id})`} />
+    </Svg>
+  );
+}
+
+export function HomeScreen({
+  onSwipeLockChange,
+  keyboardOffset,
+}: {
+  onSwipeLockChange: (locked: boolean) => void;
+  /** Height of everything above this screen (the HUD), so the keyboard never covers the input. */
+  keyboardOffset: number;
+}) {
   const t = useT();
   const lang = useLang();
   const mascot = useMascot();
@@ -45,7 +76,7 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
   const [streaming, setStreaming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   const chatProgress = useSharedValue(0);
   const ragdollProgress = useSharedValue(0);
@@ -163,24 +194,28 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
     cta = t('ctaReady');
   }
 
+  const accent = moodAccents[mascot.mood];
+  const moodLabel = t(mascot.ghost ? 'moodGhost' : MOOD_LABEL[mascot.mood]);
+
   const cycleMoodPreview = () => {
     const i = MOOD_CYCLE.indexOf(moodPreview);
     setMoodPreview(MOOD_CYCLE[(i + 1) % MOOD_CYCLE.length] ?? null);
   };
 
   // ── Animations ─────────────────────────────────────────────────────────
-  const { x: ragX, y: ragY, spin, squash, squashVertical, stageH } = ragdoll;
+  const { x: ragX, y: ragY, spin, squash, squashVertical, orbScale, stageH } = ragdoll;
   const orbStyle = useAnimatedStyle(() => {
     // The orb rests at the stage centre; in chat mode it floats up into a small head.
-    const chatScale = interpolate(chatProgress.value, [0, 1], [1, HEAD_SCALE]);
+    // orbScale drops to 0 while the orb is a puddle and springs back when it reassembles.
+    const scale = interpolate(chatProgress.value, [0, 1], [1, HEAD_SCALE]) * orbScale.value;
     const s = squash.value;
     const vertical = squashVertical.value === 1;
     return {
       transform: [
         { translateX: ragX.value },
         { translateY: ragY.value + chatProgress.value * (HEAD_CENTER_Y - stageH.value / 2) },
-        { scaleX: chatScale * (vertical ? 1 + s * 0.6 : 1 - s) },
-        { scaleY: chatScale * (vertical ? 1 - s : 1 + s * 0.6) },
+        { scaleX: scale * (vertical ? 1 + s * 0.6 : 1 - s) },
+        { scaleY: scale * (vertical ? 1 - s : 1 + s * 0.6) },
         { rotate: `${spin.value}rad` },
       ],
     };
@@ -192,6 +227,8 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
       transform: [{ translateY: hidden * 16 }],
     };
   });
+  // The ambient light belongs to the resting orb: it fades when the orb leaves the centre.
+  const glowFade = useAnimatedStyle(() => ({ opacity: 1 - Math.max(chatProgress.value, ragdollProgress.value) }));
   const ragdollBar = useAnimatedStyle(() => ({
     opacity: ragdollProgress.value,
     transform: [{ translateY: (1 - ragdollProgress.value) * 20 }],
@@ -203,8 +240,12 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
   }));
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior="padding">
+    <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={keyboardOffset}>
       <View style={styles.flex} onLayout={ragdoll.onStageLayout}>
+        <Animated.View style={[styles.orbLayer, glowFade]} pointerEvents="none">
+          <MoodGlow mood={mascot.mood} />
+        </Animated.View>
+
         <Animated.View style={[StyleSheet.absoluteFill, chatLayer]} pointerEvents={chatOpen ? 'auto' : 'none'}>
           <ChatThread messages={messages} topInset={CHAT_TOP_INSET} onSuggestion={(s) => void send(s)} />
           <Pressable onPress={closeChat} style={styles.endBtn} hitSlop={8} accessibilityRole="button">
@@ -216,23 +257,27 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           <View style={styles.heroTop} pointerEvents="box-none">
             <Animated.View style={[styles.bubble, heroFade]} pointerEvents={heroInteractive ? 'auto' : 'none'}>
-              <Text style={styles.bubbleText}>{bubble}</Text>
+              <LinearGradient colors={gradients.cardSolid} style={styles.bubbleFill} />
+              <LinearGradient colors={gradients.edge} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.bubbleEdge} />
               <View style={styles.bubbleTail} />
+              <View style={styles.status}>
+                <View style={[styles.statusDot, { backgroundColor: mascot.ghost ? colors.red : accent.color }]} />
+                <Text style={styles.statusText}>Aiqyn · {moodLabel}</Text>
+              </View>
+              <Text style={styles.bubbleText}>{bubble}</Text>
             </Animated.View>
           </View>
           <View style={styles.orbSlot} pointerEvents="none" />
           <View style={styles.heroBottom} pointerEvents="box-none">
             <Animated.View style={[styles.below, heroFade]} pointerEvents={heroInteractive ? 'auto' : 'none'}>
               <View style={styles.satietyRow}>
+                <Ionicons name="flash" size={15} color={accent.color} />
                 <View style={styles.satietyTrack}>
-                  <View
-                    style={[
-                      styles.satietyFill,
-                      {
-                        width: `${mascot.satiety}%` as const,
-                        backgroundColor: mascot.mood === 'happy' ? colors.cyan : mascot.mood === 'hungry' ? colors.amber : colors.red,
-                      },
-                    ]}
+                  <LinearGradient
+                    colors={accent.bar}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[styles.satietyFill, { width: `${mascot.satiety}%` as const }]}
                   />
                 </View>
                 <Text style={styles.satietyText}>{t('satiety', { n: mascot.satiety })}</Text>
@@ -242,6 +287,18 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
             </Animated.View>
           </View>
         </View>
+
+        <SlimeEffects
+          mood={mascot.mood}
+          splats={ragdoll.splats}
+          melted={ragdoll.melted}
+          reassembling={ragdoll.reassembling}
+          puddleX={ragdoll.puddleX}
+          hitX={ragdoll.hitX}
+          hitY={ragdoll.hitY}
+          stageW={ragdoll.stageW}
+          stageH={ragdoll.stageH}
+        />
 
         {/* The orb lives in its own full-stage layer so it can be thrown anywhere and still receive touches. */}
         <View style={styles.orbLayer} pointerEvents="box-none">
@@ -258,8 +315,15 @@ export function HomeScreen({ onSwipeLockChange }: { onSwipeLockChange: (locked: 
 
         {ragdoll.active && (
           <Animated.View style={[styles.ragdollBar, ragdollBar]} pointerEvents="box-none">
-            <Text style={styles.ragdollHint}>{t('ragdollHint')}</Text>
-            <Pressable onPress={ragdoll.reset} style={styles.ragdollReset} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.ragdollHint}>{t(ragdoll.melted ? 'ragdollMelted' : 'ragdollHint')}</Text>
+            {/* The puddle reassembles by itself; the button keeps its place so the hint doesn't jump. */}
+            <Pressable
+              onPress={ragdoll.reset}
+              disabled={ragdoll.melted}
+              style={[styles.ragdollReset, ragdoll.melted && styles.hidden]}
+              hitSlop={8}
+              accessibilityRole="button"
+            >
               <Text style={styles.endText}>{t('ragdollReset')}</Text>
             </Pressable>
           </Animated.View>
@@ -296,6 +360,7 @@ const styles = StyleSheet.create({
   orbLayer: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   ragdollBar: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', gap: 8 },
   ragdollHint: { color: colors.muted, fontSize: 12 },
+  hidden: { opacity: 0 },
   ragdollReset: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -308,13 +373,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingTop: 20,
+    paddingBottom: 14,
     maxWidth: 320,
     marginBottom: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
   },
+  bubbleFill: { ...StyleSheet.absoluteFill, borderRadius: radius.lg - 1 },
+  bubbleEdge: { position: 'absolute', top: 0, left: radius.lg, right: radius.lg, height: 1 },
   bubbleText: { color: colors.text, fontSize: 16, lineHeight: 22, textAlign: 'center', fontWeight: '500' },
+  // Matches the bottom colour of the bubble gradient.
   bubbleTail: {
     position: 'absolute',
     bottom: -7,
@@ -324,14 +397,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     transform: [{ rotate: '45deg' }],
   },
+  // Status badge sits on the top edge of the bubble.
+  status: {
+    position: 'absolute',
+    top: -12,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 24,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { color: colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
   below: { alignItems: 'center', marginTop: 18, gap: 14, width: '100%' },
-  satietyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  satietyTrack: { width: 120, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
-  satietyFill: { height: '100%', borderRadius: 2 },
-  satietyText: { color: colors.muted, fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  satietyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  satietyTrack: { width: 120, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' },
+  satietyFill: { height: '100%', borderRadius: 4 },
+  satietyText: { color: colors.muted, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
   cta: { minWidth: 220 },
   preview: { color: colors.faint, fontSize: 11 },
   endBtn: {
@@ -341,9 +431,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   endText: { color: colors.text, fontSize: 13, fontWeight: '600' },
   notice: { color: colors.muted, fontSize: 12, textAlign: 'center', paddingHorizontal: 24, paddingTop: 4 },

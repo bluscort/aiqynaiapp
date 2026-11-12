@@ -1,8 +1,7 @@
-import { useRef } from 'react';
+import { useRef, type ComponentRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useT } from '@/i18n';
-import { isAIConfigured } from '@/lib/ai';
 import { colors, radius } from '@/theme';
 import { RichText } from './RichText';
 
@@ -24,7 +23,7 @@ export function ChatThread({
   onSuggestion: (text: string) => void;
 }) {
   const t = useT();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
 
   return (
     <ScrollView
@@ -39,7 +38,6 @@ export function ChatThread({
       {messages.length === 0 ? (
         <View style={styles.intro}>
           <Text style={styles.introText}>{t('chatHello')}</Text>
-          {!isAIConfigured && <Text style={styles.demo}>{t('demoMode')}</Text>}
           <View style={styles.suggestions}>
             {(['sugg1', 'sugg2', 'sugg3', 'sugg4'] as const).map((key) => (
               <Pressable key={key} onPress={() => onSuggestion(t(key))} style={styles.suggestion}>
@@ -74,19 +72,12 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
   intro: { alignItems: 'center', paddingTop: 8, gap: 10 },
   introText: { color: colors.muted, fontSize: 15, lineHeight: 21, textAlign: 'center', maxWidth: 320 },
-  demo: {
-    color: colors.amber,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
   suggestions: { width: '100%', gap: 8, marginTop: 6 },
   suggestion: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: radius.md,
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
     borderColor: colors.border,
   },

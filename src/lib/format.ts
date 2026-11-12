@@ -22,4 +22,5 @@ export function initials(name: string): string {
     .join('');
 }
 
-export const levelFromXp = (xp: number) => Math.floor(xp / 400) + 1;
+export const XP_PER_LEVEL = 400;
+export const levelFromXp = (xp: number) => Math.floor(xp / XP_PER_LEVEL) + 1;

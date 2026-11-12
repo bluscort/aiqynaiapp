@@ -20,13 +20,17 @@ export default function Main() {
   const [homeLocked, setHomeLocked] = useState(false);
   const [battleActive, setBattleActive] = useState(false);
   const locked = homeLocked || battleActive;
+  // Measured so the chat input can clear the keyboard exactly; 90 is a sane value until the first layout.
+  const [hudHeight, setHudHeight] = useState(90);
 
   const onHomeLockChange = useCallback((locked: boolean) => setHomeLocked(locked), []);
   const onBattleChange = useCallback((playing: boolean) => setBattleActive(playing), []);
 
   return (
     <View style={styles.root}>
-      <HUD />
+      <View onLayout={(e) => setHudHeight(Math.round(e.nativeEvent.layout.height))}>
+        <HUD />
+      </View>
       <PagerView
         ref={pagerRef}
         style={styles.flex}
@@ -38,7 +42,7 @@ export default function Main() {
         }}
       >
         <View key="home" style={styles.flex}>
-          <HomeScreen onSwipeLockChange={onHomeLockChange} />
+          <HomeScreen onSwipeLockChange={onHomeLockChange} keyboardOffset={hudHeight} />
         </View>
         <View key="matcher" style={styles.flex}>
           <MatcherScreen />
